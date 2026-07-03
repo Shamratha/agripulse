@@ -3,6 +3,9 @@
 **A phenology-aware moisture-stress and 8-day irrigation-advisory engine for
 canal command areas.** Built for the Bharat Antariksh Hackathon problem statement.
 
+🔗 **Live demo:** **https://agripulse-zrc1.onrender.com**
+*(free tier — the first visit after an idle spell takes ~30–60 s to wake, then it's instant)*
+
 > **Where the contribution actually is.** Sentinel + Random Forest crop
 > classification is a solved, commodity baseline — many teams will submit it.
 > AgriPulse's differentiation is the layer *on top*: an **absolute, stage-aware
@@ -229,6 +232,17 @@ makes the design scalable is the shape of the compute, not the host:
 The realistic operational sensor is **moderate-resolution AWiFS** (indigenous,
 PS-named, wide-swath) — coarser pixels mean a state is covered in far fewer tiles,
 which is exactly why the resolution-agnostic method matters for national scale.
+
+## Deploy
+
+The dashboard is a thin FastAPI app that serves static map overlays + `summary.json`,
+so it hosts cheaply. Deployed on **Render** via the committed `render.yaml`
+Blueprint — build installs the slim `requirements-serve.txt`, start runs
+`uvicorn`, and it serves the committed real-data snapshot in `demo_outputs/`
+(`AGRIPULSE_OUTPUTS=demo_outputs`, so no GEE auth is needed at serve time).
+
+One-click redeploy: [**Deploy to Render**](https://render.com/deploy?repo=https://github.com/Shamratha/agripulse)
+→ New + → Blueprint → pick this repo → Apply.
 
 ## Layout
 
