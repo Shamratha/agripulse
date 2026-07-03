@@ -40,9 +40,20 @@ python -m venv .venv
   rabi phenology, field parcels, and tail-end stress. Demo never blocks on data access.
 - `--mode gee` — real data via Google Earth Engine (`pip install earthengine-api`,
   register at https://code.earthengine.google.com/register, then
-  `earthengine authenticate`). Collections wired in `agripulse/data_gee.py`:
+  `earthengine authenticate`; project id via `GEE_PROJECT`, default
+  `agripulse-hackathon`). Collections wired in `agripulse/data_gee.py`:
   Sentinel-2 SR, Sentinel-1 GRD, CHIRPS rainfall, ERA5-Land ET. Swap in
   LISS-III/AWiFS from Bhoonidhi for the indigenous-data story.
+
+GEE notes:
+- Fetched composites are cached in `outputs/gee_cache.npz` (offline demo
+  fallback); set `GEE_REFRESH=1` to refetch.
+- Without real survey points, training labels are **pseudo-labels** from NDVI
+  trajectory rules — fine for testing, replace before judging: set
+  `GT_CSV=path\to\points.csv` (columns `lon,lat,crop_id`).
+- `--at T` picks the composite to analyse for stress/advisory (0-based,
+  default last). Mid-season (e.g. `--at 12`, early Feb) is the interesting
+  irrigation window for rabi.
 
 ## Layout
 

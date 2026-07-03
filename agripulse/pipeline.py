@@ -39,7 +39,7 @@ def _save_scalar_png(arr, path, cmap="RdYlGn", alpha=0.82):
     plt.imsave(path, rgba)
 
 
-def run(mode="sample"):
+def run(mode="sample", t_now=None):
     OUT.mkdir(exist_ok=True)
 
     if mode == "gee":
@@ -47,6 +47,9 @@ def run(mode="sample"):
     else:
         from .data_sample import generate_scene
     scene = generate_scene()
+    T = scene["ndvi"].shape[0]
+    if t_now is None or not (0 <= t_now < T):
+        t_now = T - 1
 
     print("Extracting features...")
     features = build_features(scene)
@@ -55,17 +58,17 @@ def run(mode="sample"):
     crop_map, metrics = classify_crops(features, scene)
     print(f"  OA={metrics['overall_accuracy']:.2%}  kappa={metrics['kappa']:.3f}")
 
-    print("Assessing moisture stress (stage-aware)...")
-    stress, stage, score = stress_assessment(scene, crop_map)
+    print(f"Assessing moisture stress (stage-aware) at composite {t_now}...")
+    stress, stage, score = stress_assessment(scene, crop_map, t_now)
 
     print("Computing water balance & irrigation advisory...")
-    deficit, advisory, weather = water_balance(scene, crop_map, stage, stress)
+    deficit, advisory, weather = water_balance(scene, crop_map, stage, stress, score, t_now)
 
     # --- map overlays ---
     _save_class_png(crop_map, CROPS, OUT / "crop_map.png")
     _save_class_png(stress, STRESS_CLASSES, OUT / "stress_map.png")
     _save_class_png(advisory, ADVISORY_CLASSES, OUT / "advisory_map.png")
-    _save_scalar_png(scene["ndvi"][-1], OUT / "ndvi_latest.png")
+    _save_scalar_png(scene["ndvi"][t_now], OUT / "ndvi_latest.png")
 
     # --- time series: per-crop mean NDVI / NDWI ---
     dates = [(datetime.fromisoformat(SEASON_START) + timedelta(days=COMPOSITE_DAYS * i)
@@ -86,6 +89,7 @@ def run(mode="sample"):
     summary = {
         "generated": datetime.now().isoformat(timespec="seconds"),
         "mode": mode,
+        "analysis_date": dates[t_now],
         "bounds": PILOT_BOUNDS,
         "dates": dates,
         "metrics": metrics,

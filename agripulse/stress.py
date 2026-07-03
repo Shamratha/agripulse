@@ -36,8 +36,8 @@ def stress_assessment(scene, crop_map, t_now=None):
         z_vv = (ref_vv - vv[t_now][m]) / mad(vv[t_now], ref_vv)
         score[m] = 0.25 * z_ndvi + 0.50 * z_ndwi + 0.25 * z_vv
 
-    # classes: 0 none, 1 mild, 2 moderate, 3 severe
-    stress = np.digitize(score, [1.0, 2.0, 3.5]).astype(np.int32)
+    # classes: 0 none, 1 mild, 2 moderate, 3 severe (MAD-z units)
+    stress = np.digitize(score, [0.75, 1.5, 2.5]).astype(np.int32)
     stress[crop_map == 0] = 0
 
     stage = growth_stage(ndvi, t_now)

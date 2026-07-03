@@ -68,7 +68,8 @@ const LAYERS = [
 async function main() {
   const s = await (await fetch("/outputs/summary.json")).json();
   document.getElementById("mode").textContent =
-    (s.mode === "sample" ? "SAMPLE DATA MODE" : "GEE LIVE DATA") + " · " + s.generated.slice(0,10);
+    (s.mode === "sample" ? "SAMPLE DATA MODE" : "GEE LIVE DATA") +
+    " · analysis: " + (s.analysis_date || s.dates[s.dates.length-1]);
 
   const stressed = (s.stress_pct["Moderate"]||0) + (s.stress_pct["Severe"]||0);
   const urgent = s.advisory_pct["Irrigate now (~50 mm)"] || 0;
