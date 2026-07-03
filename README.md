@@ -237,11 +237,14 @@ agripulse/
   config.py       pilot bounds, crops, Kc table, stress/advisory thresholds, legends
   data_sample.py  synthetic scene generator (same contract as GEE provider)
   data_gee.py     GEE provider: S2/S1/CHIRPS/ERA5 + WorldCereal labels + VCI baseline
+  data_modis.py   MODIS 250 m provider for the moderate-resolution demo
   features.py     temporal features (NDVI/EVI/NDWI/VV/VH) + phenology (SOS/EOS/LGP)
   classify.py     Random Forest + spatial hold-out (kappa, per-class precision/recall/F1)
   stress.py       stage-aware VCI stress scoring
   water.py        FAO-56 Kc water balance → advisory classes
   pipeline.py     orchestration; writes georeferenced maps + summary.json
+run_pipeline.py   main entry: --mode sample|gee --at <composite>
+run_modis_demo.py moderate-resolution (MODIS 250 m) resolution-transfer demo
 dashboard/        FastAPI + Leaflet/Chart.js dashboard
 tests/            pytest suite guarding the numeric contracts
 ```
