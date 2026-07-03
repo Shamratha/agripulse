@@ -46,20 +46,28 @@ def classify_crops(features, scene, split_frac=0.5):
     # no-information rate: accuracy of always guessing the majority test class
     nir = float(cm.sum(0).max() / cm.sum()) if cm.sum() else 0.0
     with np.errstate(divide="ignore", invalid="ignore"):
-        recall = np.nan_to_num(cm.diagonal() / cm.sum(1)).round(3).tolist()
+        recall = np.nan_to_num(cm.diagonal() / cm.sum(1))      # producer's accuracy
+        precision = np.nan_to_num(cm.diagonal() / cm.sum(0))   # user's accuracy
+        f1 = np.nan_to_num(2 * precision * recall / (precision + recall))
     metrics = {
         "overall_accuracy": round(float(accuracy_score(y[test], pred)), 4),
         "kappa": round(float(cohen_kappa_score(y[test], pred)), 4),
         "no_information_rate": round(nir, 4),
-        "per_class_recall": dict(zip(labels_present, recall)),
+        "per_class_recall": dict(zip(labels_present, recall.round(3).tolist())),
+        "per_class_precision": dict(zip(labels_present, precision.round(3).tolist())),
+        "per_class_f1": dict(zip(labels_present, f1.round(3).tolist())),
+        "macro_f1": round(float(f1.mean()), 4),
         "confusion_matrix": cm.tolist(),
         "labels": labels_present,
         "n_train": int(train.sum()), "n_test": int(test.sum()),
         "validation": split,
-        "reference": "ESA WorldCereal 2021" if scene.get("wc_label") is not None else "field survey",
+        "reference": "ESA WorldCereal 2021 (satellite product, not in-situ field data)"
+                     if scene.get("wc_label") is not None else "synthetic field labels (sample mode)",
     }
 
-    # retrain on all points for the delivered wall-to-wall map
+    # retrain on all points for the delivered wall-to-wall map + per-pixel confidence
     rf.fit(X, y)
-    crop_map = rf.predict(features).reshape(H, W).astype(np.int32)
-    return crop_map, metrics
+    proba = rf.predict_proba(features)
+    crop_map = rf.classes_[proba.argmax(1)].reshape(H, W).astype(np.int32)
+    confidence = proba.max(1).reshape(H, W).astype(np.float32)
+    return crop_map, confidence, metrics

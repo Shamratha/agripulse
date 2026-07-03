@@ -44,6 +44,30 @@ STRESS_CLASSES = {
 
 ADVISORY_CLASSES = {
     0: {"name": "No irrigation needed", "color": "#4575b4"},
-    1: {"name": "Irrigate within 8 days (~25 mm)", "color": "#fdae61"},
-    2: {"name": "Irrigate now (~50 mm)", "color": "#d73027"},
+    1: {"name": "Schedule irrigation (within 8 days)", "color": "#fdae61"},
+    2: {"name": "Irrigate now (deficit critical)", "color": "#d73027"},
 }
+
+# --- tunable coefficients (kept here, not buried as magic numbers) ---
+
+# Stress score blend (VCI is absolute vegetation condition; NDWI is canopy water)
+STRESS_WEIGHTS = {"vci": 0.7, "ndwi": 0.3}
+
+# VCI stress bands are STAGE-DEPENDENT: flowering is the most drought-sensitive
+# wheat stage, maturity's natural dry-down is tolerated. Per stage index
+# (0 Sowing,1 Vegetative,2 Flowering,3 Maturity): [none>=, mild>=, moderate>=];
+# below the last value is severe. Higher thresholds => flagged sooner.
+STRESS_VCI_BANDS = {
+    0: [0.40, 0.28, 0.15],
+    1: [0.45, 0.32, 0.18],
+    2: [0.55, 0.40, 0.25],
+    3: [0.40, 0.25, 0.12],
+}
+
+# Water balance / advisory
+EFF_RAIN_NOW = 0.8        # fraction of this composite's rain that is effective
+EFF_RAIN_PREV = 0.3       # soil-storage carry-over from the previous composite
+DEFICIT_TRIGGER_MM = 8    # 8-day deficit above which irrigation is advised
+DEFICIT_CRITICAL_MM = 35  # deficit above which "irrigate now" regardless of stress
+VCI_WET_DEESCALATE = 0.75 # VCI above which a pixel is treated as recently watered
+

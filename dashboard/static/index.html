@@ -20,12 +20,12 @@
   .card .v { font-size:24px; font-weight:600; margin-top:2px; }
   .card .l { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
   .card .sub2 { color:#6f8578; font-size:11px; margin-top:2px; }
-  #valBody { font-size:13px; }
-  #valBody table { border-collapse:collapse; margin:6px 0 10px; }
-  #valBody th, #valBody td { padding:4px 9px; text-align:center; border:1px solid var(--line); }
-  #valBody th { color:var(--muted); font-weight:500; font-size:12px; }
+  #valBody, #stageBody { font-size:13px; }
+  #valBody table, #stageBody table { border-collapse:collapse; margin:6px 0 10px; }
+  #valBody th, #valBody td, #stageBody th, #stageBody td { padding:4px 9px; text-align:center; border:1px solid var(--line); }
+  #valBody th, #stageBody th { color:var(--muted); font-weight:500; font-size:12px; }
   #valBody .diag { font-weight:700; }
-  #valBody .note { color:#6f8578; font-size:12px; line-height:1.45; }
+  #valBody .note, #stageBody .note { color:#6f8578; font-size:12px; line-height:1.45; }
   .rec { display:inline-block; min-width:38px; }
   .grid { display:grid; grid-template-columns:1.25fr 1fr; gap:14px; }
   @media (max-width:980px){ .grid{grid-template-columns:1fr} }
@@ -63,6 +63,10 @@
       <h2>Validation — vs ESA WorldCereal (spatial hold-out)</h2>
       <div id="valBody"></div>
     </div>
+    <div class="panel" id="stagePanel">
+      <h2>Stage-wise moisture stress by crop (% moderate + severe)</h2>
+      <div id="stageBody"></div>
+    </div>
     <div class="panel"><h2>Crop NDVI Trajectories (season)</h2><canvas id="ndviChart"></canvas></div>
     <div class="panel"><h2>Canopy Water (NDWI)</h2><canvas id="ndwiChart"></canvas></div>
     <div class="panel"><h2>Weather — ET₀ demand vs rainfall (mm / 8 days)</h2><canvas id="wxChart"></canvas></div>
@@ -75,6 +79,8 @@ const LAYERS = [
   { key:"stress",   title:"Moisture Stress", img:"/outputs/stress_map.png" },
   { key:"advisory", title:"Irrigation Advisory", img:"/outputs/advisory_map.png" },
   { key:"vci",      title:"VCI (condition)", img:"/outputs/vci_map.png" },
+  { key:"smi",      title:"SMI (soil moisture)", img:"/outputs/smi_map.png" },
+  { key:"confidence", title:"Classifier confidence", img:"/outputs/confidence_map.png" },
   { key:"ndvi",     title:"NDVI (latest)", img:"/outputs/ndvi_latest.png" },
 ];
 
@@ -83,19 +89,40 @@ function renderValidation(m, cropLegend) {
   const short = ["Non-crop", "Wheat", "Other crop"];
   const cm = m.confusion_matrix, L = m.labels;
   const tot = cm.flat().reduce((a,b)=>a+b,0);
-  let html = `<table><tr><th>truth ↓ / pred →</th>${L.map(i=>`<th>${short[i]||names[i]}</th>`).join("")}<th>recall</th></tr>`;
+  let html = `<table><tr><th>truth ↓ / pred →</th>${L.map(i=>`<th>${short[i]||names[i]}</th>`).join("")}<th>recall</th><th>prec</th><th>F1</th></tr>`;
   cm.forEach((row,ri) => {
     const rsum = row.reduce((a,b)=>a+b,0);
     html += `<tr><th>${short[L[ri]]||names[L[ri]]}</th>` +
       row.map((v,ci)=>`<td class="${ri===ci?'diag':''}" style="background:rgba(76,175,125,${(v/Math.max(rsum,1)*0.55).toFixed(2)})">${v}</td>`).join("") +
-      `<td class="rec">${(m.per_class_recall[L[ri]]*100).toFixed(0)}%</td></tr>`;
+      `<td class="rec">${(m.per_class_recall[L[ri]]*100).toFixed(0)}%</td>` +
+      `<td class="rec">${((m.per_class_precision?.[L[ri]]??0)*100).toFixed(0)}%</td>` +
+      `<td class="rec">${((m.per_class_f1?.[L[ri]]??0)*100).toFixed(0)}%</td></tr>`;
   });
   html += `</table>`;
   html += `<div class="note">${m.n_train} train / ${m.n_test} test points · ${m.validation} · reference: ${m.reference}. `
-    + `Overall accuracy ${(m.overall_accuracy*100).toFixed(1)}% vs ${(m.no_information_rate*100).toFixed(1)}% "always-wheat" baseline; `
-    + `κ=${m.kappa.toFixed(2)} confirms real skill. Wheat & cropland detection are strong; subdividing the heterogeneous `
-    + `"other cropland" class is the hard part (a known limit of one-class-fits-all mixed crops).</div>`;
+    + `Headline is <b>κ=${m.kappa.toFixed(2)}</b> / macro-F1 ${(m.macro_f1*100).toFixed(0)}%; overall accuracy ${(m.overall_accuracy*100).toFixed(1)}% only just beats the ${(m.no_information_rate*100).toFixed(1)}% "always-wheat" baseline, so OA alone is not the story. `
+    + `Wheat & cropland detection are strong; subdividing the heterogeneous "other cropland" class is the hard part. `
+    + `Reference labels are a satellite product (WorldCereal), not in-situ field truth — set GT_CSV to validate against real survey points.</div>`;
   document.getElementById("valBody").innerHTML = html;
+}
+
+function renderStageStress(data) {
+  const el = document.getElementById("stageBody");
+  if (!data || !Object.keys(data).length) { el.textContent = "—"; return; }
+  const stages = ["Sowing","Vegetative","Flowering","Maturity"];
+  let html = `<table><tr><th>crop</th>${stages.map(s=>`<th>${s}</th>`).join("")}</tr>`;
+  for (const [crop, byStage] of Object.entries(data)) {
+    html += `<tr><th>${crop}</th>` + stages.map(st => {
+      const d = byStage[st];
+      if (!d) return `<td style="color:#4a5a52">–</td>`;
+      const p = d.pct_moderate_severe;
+      const bg = `rgba(215,48,39,${Math.min(p/25,1).toFixed(2)})`;
+      return `<td style="background:${bg}" title="${d.area_ha} ha">${p.toFixed(1)}%</td>`;
+    }).join("") + `</tr>`;
+  }
+  html += `</table><div class="note">Cell = % of that crop×stage under moderate+severe stress (hover for area in ha). `
+    + `Flowering is the drought-sensitive wheat stage and uses stricter VCI thresholds.</div>`;
+  el.innerHTML = html;
 }
 
 async function main() {
@@ -106,21 +133,27 @@ async function main() {
 
   const m = s.metrics;
   const stressed = (s.stress_pct["Moderate"]||0) + (s.stress_pct["Severe"]||0);
-  const urgent = s.advisory_pct["Irrigate now (~50 mm)"] || 0;
+  const advKeys = Object.keys(s.advisory_pct);
+  const urgent = s.advisory_pct[advKeys.find(k=>/now/i.test(k))] || 0;
   const nir = m.no_information_rate != null ? (m.no_information_rate*100).toFixed(1)+"%" : "—";
+  const smiR = s.smi_crosscheck ? s.smi_crosscheck.smi_vs_rain_lag1_corr : null;
   const cards = [
-    ["Overall accuracy", (m.overall_accuracy*100).toFixed(1)+"%", "vs "+nir+" baseline"],
-    ["Kappa", m.kappa.toFixed(2), "skill above chance"],
+    ["Kappa", m.kappa.toFixed(2), "the honest headline"],
+    ["Macro-F1", (m.macro_f1*100).toFixed(0)+"%", "mean over classes"],
+    ["Overall accuracy", (m.overall_accuracy*100).toFixed(1)+"%", "vs "+nir+" always-wheat"],
     ["Map agreement", m.map_agreement_worldcereal!=null ? (m.map_agreement_worldcereal*100).toFixed(1)+"%" : "—", "wall-to-wall vs WorldCereal"],
     ["Cropped area stressed", stressed.toFixed(1)+"%", "moderate + severe (VCI)"],
     ["Mean VCI", s.mean_vci!=null ? s.mean_vci.toFixed(2) : "—", "0 worst … 1 best on record"],
-    ["Mean 8-day deficit", s.mean_deficit_mm+" mm", "ETc − effective rain"],
+    ["Recommended depth", (s.recommended_depth_mm||0)+" mm", "mean deficit where advised"],
     ["Irrigate now", urgent.toFixed(1)+"%", "of cropped area"],
+    ["SMI ↔ prior rain", smiR!=null ? "r="+smiR.toFixed(2) : "—", "independent moisture check"],
+    ["Cloud-filled", s.mean_cloud_fill_fraction!=null ? (s.mean_cloud_fill_fraction*100).toFixed(0)+"%" : "—", "mean gap-filled pixels"],
   ];
   document.getElementById("cards").innerHTML = cards.map(
     ([l,v,sub]) => `<div class="card"><div class="l">${l}</div><div class="v">${v}</div><div class="sub2">${sub||""}</div></div>`).join("");
 
   renderValidation(m, s.legends.crop);
+  renderStageStress(s.stress_by_stage_crop);
 
   // --- map ---
   const [w,so,e,n] = s.bounds, bounds = [[so,w],[n,e]];
@@ -132,6 +165,8 @@ async function main() {
 
   const legends = { crop:s.legends.crop, stress:s.legends.stress, advisory:s.legends.advisory,
                     vci:{ "stressed (VCI 0)":"#d73027", "healthy (VCI 1)":"#1a9850" },
+                    smi:{ "dry soil":"#ffffcc", "wet soil":"#225ea8" },
+                    confidence:{ "low conf":"#440154", "high conf":"#fde725" },
                     ndvi:{ "low NDVI":"#d73027", "high NDVI":"#1a9850" } };
   const tabs = document.getElementById("tabs");
   LAYERS.forEach((l,i) => {

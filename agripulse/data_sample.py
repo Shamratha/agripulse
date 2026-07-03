@@ -88,8 +88,13 @@ def generate_scene(size=GRID_SIZE, n_fields=140, n_steps=N_COMPOSITES):
             gt_cols.append(c_)
             gt_labels.append(field_crop[fi])
 
+    # EVI ~ scaled NDVI (dense-canopy de-saturation); SMI ~ inverse of stress
+    evi = np.clip(2.5 * ndvi / (ndvi + 2.4), -0.1, 1.0).astype(np.float32)
+    smi = np.clip(0.55 + 0.35 * (ndwi - ndwi.mean()) / (ndwi.std() + 1e-6) * 0.3,
+                  0, 1).astype(np.float32)
+
     return {
-        "ndvi": ndvi, "ndwi": ndwi, "vv": vv, "vh": vh,
+        "ndvi": ndvi, "ndwi": ndwi, "evi": evi, "vv": vv, "vh": vh, "smi": smi,
         "crop_truth": crop, "field_id": field_id, "stressed_truth": stressed,
         "et0": et0, "rain": rain,
         "gt": (np.array(gt_rows), np.array(gt_cols), np.array(gt_labels)),

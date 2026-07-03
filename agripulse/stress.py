@@ -22,6 +22,7 @@ same-crop spatial anomaly.
 
 import numpy as np
 
+from .config import STRESS_VCI_BANDS, STRESS_WEIGHTS
 from .features import growth_stage
 
 
@@ -31,22 +32,35 @@ def stress_assessment(scene, crop_map, t_now=None):
     if t_now is None:
         t_now = T - 1
 
+    stage = growth_stage(ndvi, t_now)
+    stage[crop_map == 0] = 0
+
     lo, hi = scene.get("ndvi_lo"), scene.get("ndvi_hi")
     if lo is not None and hi is not None:
         score, vci = _vci_score(ndvi, ndwi, crop_map, lo, hi, t_now)
-        # VCI drought thresholds: >=0.5 none, 0.35-0.5 mild, 0.2-0.35 moderate, <0.2 severe
-        stress = np.select(
-            [vci >= 0.5, vci >= 0.35, vci >= 0.2],
-            [0, 1, 2], default=3).astype(np.int32)
+        stress = _stage_aware_vci_classes(vci, stage)
     else:
         score = _anomaly_score(ndvi, ndwi, vv, crop_map, t_now)
         vci = None
         stress = np.digitize(score, [0.75, 1.5, 2.5]).astype(np.int32)
 
     stress[crop_map == 0] = 0
-    stage = growth_stage(ndvi, t_now)
-    stage[crop_map == 0] = 0
     return stress, stage, score, vci
+
+
+def _stage_aware_vci_classes(vci, stage):
+    """Map VCI -> stress class using STAGE-DEPENDENT thresholds.
+
+    Flowering wheat is flagged at a higher VCI than maturity, so the same
+    absolute condition is read as more stressful at the drought-sensitive stage.
+    """
+    stress = np.full(vci.shape, 3, dtype=np.int32)  # default severe
+    for s, (b0, b1, b2) in STRESS_VCI_BANDS.items():
+        m = stage == s
+        stress[m & (vci >= b2)] = 2
+        stress[m & (vci >= b1)] = 1
+        stress[m & (vci >= b0)] = 0
+    return stress
 
 
 def _vci_score(ndvi, ndwi, crop_map, lo, hi, t_now):
@@ -65,7 +79,7 @@ def _vci_score(ndvi, ndwi, crop_map, lo, hi, t_now):
         ndwi_def[m] = np.clip((ref - ndwi[t_now][m]) / spread, 0, 1)
 
     # stress score in 0..1: low VCI and/or high canopy-water deficit
-    score = 0.7 * (1 - vci) + 0.3 * ndwi_def
+    score = STRESS_WEIGHTS["vci"] * (1 - vci) + STRESS_WEIGHTS["ndwi"] * ndwi_def
     score[crop_map == 0] = 0
     return score.astype(np.float32), vci
 

@@ -8,13 +8,15 @@ ee.data.computePixels:
   Sentinel-2 SR  -> NDVI, NDWI     Sentinel-1 GRD -> VV, VH
   CHIRPS         -> rainfall        ERA5-Land      -> ET0 proxy
 
-Ground truth is REAL: crop labels come from ESA WorldCereal 2021 (a global
-crop product validated against 100k+ in-situ field samples), sampled only at
-high-confidence pixels. That makes the reported accuracy a genuine agreement
-with an independently field-validated reference, not a self-fulfilling metric.
+Crop labels come from ESA WorldCereal 2021 — a global crop product that is
+itself satellite-derived (validated globally against ~100k in-situ samples, but
+NOT field-verified for this specific tile). So the reported OA/kappa measure
+AGREEMENT WITH A SATELLITE PRODUCT, not accuracy against ground truth here, and
+share some spectral-confusion modes with our own classifier. Treat them as a
+reasonable reference baseline, not field accuracy.
 
-For the hackathon's own survey points, set GT_CSV (columns lon,lat,crop_id) to
-override WorldCereal.
+For real field accuracy, set GT_CSV (columns lon,lat,crop_id) to the hackathon's
+own survey points; the pipeline then reports OA/kappa against THOSE.
 """
 
 import csv
@@ -43,6 +45,12 @@ N_FLOOR = 70           # minimum points per present class (so rare classes still
 VCI_YEARS = list(range(2019, 2025))   # multi-year NDVI baseline for VCI (per 8-day window)
 
 
+def _fingerprint():
+    """Identity of the fetch config, so a stale cache for a different region/season
+    is auto-invalidated instead of silently served."""
+    return f"{PILOT_BOUNDS}|{GRID_SIZE}|{SEASON_START}|{N_COMPOSITES}|{COMPOSITE_DAYS}|{VCI_YEARS}"
+
+
 def _grid():
     w, s, e, n = PILOT_BOUNDS
     return {
@@ -53,6 +61,32 @@ def _grid():
         },
         "crsCode": "EPSG:4326",
     }
+
+
+def _mask_s2_clouds(img):
+    """Per-pixel cloud/shadow/cirrus mask from the Sentinel-2 SCL band.
+
+    Scene-level CLOUDY_PIXEL_PERCENTAGE only drops whole tiles; this removes the
+    individual contaminated pixels (SCL 3 shadow, 8/9 cloud, 10 cirrus) so the
+    median composite is built from clear observations.
+    """
+    scl = img.select("SCL")
+    clear = (scl.neq(3).And(scl.neq(8)).And(scl.neq(9)).And(scl.neq(10)))
+    return img.updateMask(clear)
+
+
+def _despeckle(s1_db):
+    """Speckle reduction for Sentinel-1: 3x3 focal median in linear power.
+
+    SAR GRD is multiplicative-noise heavy; filtering in linear power (not dB)
+    is the correct domain. This is a boxcar/median filter; Refined Lee is the
+    edge-preserving production upgrade. Temporal median compositing already
+    removes much speckle; this cleans residual pixel spikes.
+    """
+    import ee
+    nat = ee.Image(10).pow(s1_db.divide(10))
+    filt = nat.focal_median(1.5, "square", "pixels")
+    return filt.log10().multiply(10)
 
 
 def _fetch(ee, image, bands):
@@ -70,8 +104,11 @@ def _fetch(ee, image, bands):
 def generate_scene():
     if os.path.exists(CACHE) and not os.environ.get("GEE_REFRESH"):
         d = dict(np.load(CACHE))
+        cached_fp = str(d.get("fingerprint", ""))
         if "ndvi_lo" not in d:
             print("  cache missing VCI baseline; refetching from GEE...")
+        elif cached_fp != _fingerprint():
+            print(f"  cache is for a different area/season config; refetching from GEE...")
         else:
             print(f"  using cached data ({CACHE}); set GEE_REFRESH=1 to refetch")
             gt = _load_gt_csv() if GT_CSV else _sample_labels(d["label"], d["conf"])
@@ -89,9 +126,12 @@ def generate_scene():
 
     ndvi = np.full((N_COMPOSITES, GRID_SIZE, GRID_SIZE), np.nan, np.float32)
     ndwi = np.full_like(ndvi, np.nan)
+    evi = np.full_like(ndvi, np.nan)
     vv = np.full_like(ndvi, np.nan)
     vh = np.full_like(ndvi, np.nan)
+    smi_raw = np.full_like(ndvi, np.nan)   # ERA5-Land volumetric soil water (m3/m3)
     et0, rain = np.zeros(N_COMPOSITES), np.zeros(N_COMPOSITES)
+    fill_fraction = np.zeros(N_COMPOSITES)
 
     for i in range(N_COMPOSITES):
         t0 = start.advance(i * COMPOSITE_DAYS, "day")
@@ -99,28 +139,47 @@ def generate_scene():
         print(f"  composite {i + 1}/{N_COMPOSITES}...", flush=True)
 
         s2 = (ee.ImageCollection(S2_SR).filterBounds(region).filterDate(t0, t1)
-              .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 40)))
+              .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 40))
+              .map(_mask_s2_clouds))   # per-pixel SCL cloud/shadow masking
         if s2.size().getInfo() > 0:
             comp = s2.median()
+            r_ = comp.select("B4").divide(10000)
+            n_ = comp.select("B8").divide(10000)
+            b_ = comp.select("B2").divide(10000)
+            evi_band = n_.subtract(r_).multiply(2.5).divide(
+                n_.add(r_.multiply(6)).subtract(b_.multiply(7.5)).add(1)).rename("evi")
             img = (comp.normalizedDifference(["B8", "B4"]).rename("ndvi")
-                   .addBands(comp.normalizedDifference(["B3", "B8"]).rename("ndwi")))
-            ndvi[i], ndwi[i] = _fetch(ee, img, ["ndvi", "ndwi"])
+                   .addBands(comp.normalizedDifference(["B3", "B8"]).rename("ndwi"))
+                   .addBands(evi_band))
+            ndvi[i], ndwi[i], evi[i] = _fetch(ee, img, ["ndvi", "ndwi", "evi"])
 
         s1 = (ee.ImageCollection(S1_GRD).filterBounds(region).filterDate(t0, t1)
               .filter(ee.Filter.eq("instrumentMode", "IW"))
               .filter(ee.Filter.listContains("transmitterReceiverPolarisation", "VH")))
         if s1.size().getInfo() > 0:
-            vv[i], vh[i] = _fetch(ee, s1.median(), ["VV", "VH"])
+            vv[i], vh[i] = _fetch(ee, _despeckle(s1.median()), ["VV", "VH"])
 
         r = (ee.ImageCollection(CHIRPS).filterDate(t0, t1).sum()
              .reduceRegion(ee.Reducer.mean(), region, 5000).getInfo())
         rain[i] = r.get("precipitation") or 0.0
-        p = (ee.ImageCollection(ERA5_LAND).filterDate(t0, t1)
-             .select("potential_evaporation_sum").sum()
+        era = ee.ImageCollection(ERA5_LAND).filterDate(t0, t1)
+        p = (era.select("potential_evaporation_sum").sum()
              .reduceRegion(ee.Reducer.mean(), region, 10000).getInfo())
         et0[i] = abs(p.get("potential_evaporation_sum") or 0.02) * 1000
+        sm = era.select("volumetric_soil_water_layer_1").mean()
+        smi_raw[i] = _fetch(ee, sm.rename("sm"), ["sm"])[0]
 
-    _gap_fill(ndvi), _gap_fill(ndwi), _gap_fill(vv), _gap_fill(vh)
+        fill_fraction[i] = float(np.isnan(ndvi[i]).mean())
+
+    _gap_fill(ndvi), _gap_fill(ndwi), _gap_fill(evi)
+    _gap_fill(vv), _gap_fill(vh), _gap_fill(smi_raw)
+
+    # SMI (Soil Moisture Index): per-pixel min-max normalisation of ERA5 soil
+    # water over the season -> 0 (driest on record) .. 1 (wettest). An
+    # INDEPENDENT (reanalysis) moisture signal to cross-check the optical VCI.
+    sm_lo = np.nanmin(smi_raw, axis=0)
+    sm_hi = np.nanmax(smi_raw, axis=0)
+    smi = np.clip((smi_raw - sm_lo) / np.maximum(sm_hi - sm_lo, 1e-6), 0, 1).astype(np.float32)
 
     print("  fetching ESA WorldCereal ground-truth labels...")
     label, conf = _worldcereal(ee, region)
@@ -129,15 +188,17 @@ def generate_scene():
     ndvi_lo, ndvi_hi = _vci_baseline(ee, region, start)
 
     os.makedirs(os.path.dirname(CACHE), exist_ok=True)
-    np.savez_compressed(CACHE, ndvi=ndvi, ndwi=ndwi, vv=vv, vh=vh, et0=et0, rain=rain,
-                        label=label, conf=conf, ndvi_lo=ndvi_lo, ndvi_hi=ndvi_hi)
+    np.savez_compressed(CACHE, ndvi=ndvi, ndwi=ndwi, evi=evi, vv=vv, vh=vh,
+                        smi=smi, et0=et0, rain=rain, fill_fraction=fill_fraction,
+                        label=label, conf=conf, ndvi_lo=ndvi_lo, ndvi_hi=ndvi_hi,
+                        fingerprint=_fingerprint())
 
     gt = _load_gt_csv() if GT_CSV else _sample_labels(label, conf)
     return {
-        "ndvi": ndvi, "ndwi": ndwi, "vv": vv, "vh": vh,
+        "ndvi": ndvi, "ndwi": ndwi, "evi": evi, "vv": vv, "vh": vh, "smi": smi,
         "crop_truth": None, "field_id": None, "stressed_truth": None,
-        "et0": et0, "rain": rain, "gt": gt, "wc_label": label,
-        "ndvi_lo": ndvi_lo, "ndvi_hi": ndvi_hi,
+        "et0": et0, "rain": rain, "fill_fraction": fill_fraction,
+        "gt": gt, "wc_label": label, "ndvi_lo": ndvi_lo, "ndvi_hi": ndvi_hi,
     }
 
 

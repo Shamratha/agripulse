@@ -9,13 +9,16 @@ def build_features(scene):
     T, H, W = ndvi.shape
 
     layers = [ndvi, ndwi, vv, vh, vh - vv]  # ratio in dB space = difference
+    if scene.get("evi") is not None:
+        layers.append(scene["evi"])
     feats = [l.reshape(T, -1).T for l in layers]  # each (N, T)
 
-    # temporal summaries per pixel
+    # phenology metrics per pixel
     n = ndvi.reshape(T, -1)
+    s, e = sos(ndvi).ravel(), eos(ndvi).ravel()
     summaries = np.stack([
         n.max(0), n.mean(0), n.std(0), n.argmax(0),
-        sos(ndvi).ravel(), eos(ndvi).ravel(),
+        s, e, e - s,   # SOS, EOS, LGP (length of growing period)
     ], axis=1)
 
     return np.hstack(feats + [summaries]).astype(np.float32)

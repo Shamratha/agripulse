@@ -11,23 +11,35 @@ product validated against 100k+ in-situ field samples).
 
 ## Validation (honest numbers)
 
-Classifier is trained and validated against WorldCereal using a **spatial
-west/east hold-out** (not a random pixel split — random splits leak through
-neighbouring correlated pixels and inflate scores). On the pilot:
+Classifier is validated against WorldCereal using a **spatial west/east hold-out**
+(not a random pixel split — random splits leak through neighbouring correlated
+pixels and inflate scores). **Kappa / macro-F1 are the headline, not OA** — in an
+~86%-wheat monoculture an "always-wheat" classifier already scores ~90%.
 
 | metric | value | meaning |
 |---|---|---|
-| Overall accuracy | ~90.7% | vs ~90.1% "always-wheat" baseline |
-| Kappa | ~0.60 | skill above chance (the honest headline in a wheat monoculture) |
-| Full-map agreement | ~88.8% | wall-to-wall vs WorldCereal |
-| Wheat recall | 99% | winter-cereal detection is strong |
-| Non-crop recall | 60% | rare class (~4% of area), edge/built-up confusion |
-| Other-crop recall | 37% | heterogeneous catch-all — the genuine hard part |
+| **Kappa** | **~0.63** | skill above chance — the honest headline |
+| Macro-F1 | ~0.74 | mean F1 across the three classes |
+| Overall accuracy | ~91.3% | only just beats the ~89.6% "always-wheat" baseline |
+| Full-map agreement | ~88.9% | wall-to-wall vs WorldCereal |
+| Wheat F1 | 0.96 | winter-cereal detection is strong |
+| Non-crop F1 | 0.77 | rare class (~4% of area) |
+| Other-crop F1 | 0.50 | heterogeneous catch-all — the genuine hard part |
 
-Cropland vs non-cropland and wheat detection are strong; subdividing the ~10%
-mixed "other cropland" (mustard/potato/veg) is where error concentrates —
-expected, since those spectrally-similar rabi crops share one WorldCereal class.
-Swap in the hackathon's own finer field labels (`GT_CSV`) to sharpen this.
+> **On the ground truth:** WorldCereal is itself a *satellite-derived* product
+> (globally validated against ~100k field samples, but **not** field-verified for
+> this tile). So OA/kappa here measure **agreement with a satellite reference**,
+> not accuracy against ground truth, and share some spectral-confusion modes with
+> our classifier. Set `GT_CSV` (lon,lat,crop_id) to the hackathon's own survey
+> points to report accuracy against *real* field data.
+
+**What is validated, not just asserted:**
+- **Crop map:** spatial hold-out with full confusion matrix, per-class
+  precision/recall/F1, and the no-information baseline printed alongside OA.
+- **Stress detector:** in sample mode, scored against injected field stress
+  (recall ~0.86 / precision ~0.87) — it demonstrably recovers real stress.
+- **Soil moisture (SMI):** independent ERA5 soil moisture rises the composite
+  *after* rainfall (r ≈ 0.32), confirming the moisture layer is physically real.
 
 ## Pipeline
 
@@ -42,16 +54,32 @@ Weather (CHIRPS rain, ERA5 ET₀) ──► Kc water balance ◄─ stage-aware 
                             irrigation advisory maps + dashboard
 ```
 
-- **Crop classification** — Random Forest on multi-temporal NDVI/NDWI/VV/VH +
-  phenology metrics (SOS, EOS, peak timing); validated with OA and kappa.
+- **Preprocessing** — Sentinel-2 L2A surface reflectance with per-pixel SCL
+  cloud/shadow masking; Sentinel-1 GRD with a focal-median speckle filter
+  (linear power); 8-day temporal-median compositing; cloudy gaps forward/back
+  filled and the **fill fraction reported**.
+- **Features** — multi-temporal NDVI, **EVI**, NDWI, VV, VH, VH−VV ratio +
+  phenology metrics (SOS, EOS, **LGP**, peak timing, temporal stats).
+- **Crop classification** — Random Forest; reported with kappa, macro-F1,
+  per-class precision/recall/F1, no-information baseline, and a per-pixel
+  **confidence** raster (`predict_proba`).
 - **Moisture stress** — primary signal is **VCI (Vegetation Condition Index)**,
   an *absolute* index: each pixel's NDVI vs its own multi-year (2019–24) 10th/90th
-  percentile envelope for that 8-day window. VCI≈0 = worst-on-record, ≈1 = best.
-  Blended with a canopy-water (NDWI) term. Because it's absolute, it detects
-  region-wide stress that a spatial anomaly cannot. (Sample mode, with no
-  multi-year history, falls back to a same-crop spatial anomaly.)
-- **Irrigation advisory** — FAO-56 Kc × ET₀ demand minus effective rainfall,
-  escalated by observed stress → *no action / irrigate within 8 days / irrigate now*.
+  percentile envelope for that 8-day window (VCI≈0 = worst-on-record, ≈1 = best),
+  blended with a canopy-water (NDWI) term. **Stage-dependent thresholds** —
+  flowering is flagged at a higher VCI than maturity. Cross-checked against an
+  independent **SMI** (ERA5 soil moisture). Sample mode falls back to a
+  same-crop spatial anomaly.
+- **Irrigation advisory** — FAO-56 Kc × ET₀ demand minus effective rainfall
+  (with soil-storage carry-over) → *no action / schedule within 8 days /
+  irrigate now*; "now" requires **confirmed VCI stress**, keeping the advisory
+  coherent with the stress layer. Recommended depth = the computed deficit (mm).
+- **Outputs** — every map PNG ships with a `.wld` + `.prj` sidecar so it loads
+  as a **georeferenced raster in QGIS**; `summary.json` carries stage-wise stress
+  per crop, areas in hectares, and all validation metrics.
+
+Tunable coefficients (stress weights, VCI bands, Kc, deficit thresholds) live in
+`config.py`, not as magic numbers. Run tests with `.venv\Scripts\python -m pytest`.
 
 ## Run it
 
