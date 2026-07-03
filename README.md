@@ -92,10 +92,25 @@ explicitly:
 
 So **Sentinel-1/2 are named, sanctioned PS inputs** — this prototype is on-spec,
 not off it. We deliberately use Sentinel's finer 10–20 m scale because a 20 km
-pilot needs field-level detail to be credible. The method — temporal indices →
-RF → multi-year VCI → FAO-56 — is **resolution-agnostic** and runs unchanged on
-moderate-resolution AWiFS/MODIS; coarser pixels are in fact the *operational*
-sweet spot (far fewer pixels to cover a state).
+pilot needs field-level detail to be credible.
+
+**Demonstrated, not just claimed.** `run_modis_demo.py` runs the *identical*
+feature → Random-Forest → 4-fold-spatial-CV code on **MODIS MOD13Q1 at 250 m**
+(the MODerate-resolution sensor, PS-named) over the same pilot and season:
+
+| run | resolution | Kappa | Wheat F1 | minority classes |
+|---|---|---|---|---|
+| Sentinel-2 (main) | 10–20 m | 0.67 ± 0.03 | 0.96 | non-crop 0.81, other 0.55 |
+| MODIS (demo) | 250 m | 0.40 ± 0.10 | 0.96 | non-crop 0.00, other 0.44 |
+
+The method transfers **unchanged** — that's the point. The dominant wheat class
+stays strong at 250 m; the accuracy drop is entirely the *expected resolution ↔
+coverage trade-off* (coarse pixels blur small, mixed, and rare fields, so
+minority classes collapse), not a code or method difference. Fine Sentinel suits
+a command-area pilot; moderate-resolution AWiFS/MODIS trades per-field detail for
+the wide swath that makes **national wall-to-wall** monitoring tractable. (The
+demo covers the classifier; the VCI stress layer needs a per-sensor multi-year
+baseline calibration and stays on the Sentinel run.)
 
 **On indigenous data (honest status).** The current stack is open/foreign
 (Copernicus, CHIRPS, ERA5, WorldCereal) chosen for reproducibility — all
