@@ -66,7 +66,13 @@ def run(mode="sample", t_now=None):
         print(f"  full-map agreement vs WorldCereal: {metrics['map_agreement_worldcereal']:.2%}")
 
     print(f"Assessing moisture stress (stage-aware) at composite {t_now}...")
-    stress, stage, score = stress_assessment(scene, crop_map, t_now)
+    stress, stage, score, vci = stress_assessment(scene, crop_map, t_now)
+    cropped_mask = crop_map != 0
+    if vci is not None:
+        print(f"  method: VCI (multi-year baseline); mean VCI over crops = "
+              f"{float(vci[cropped_mask].mean()):.2f}")
+    else:
+        print("  method: same-crop spatial anomaly (no multi-year baseline)")
 
     print("Computing water balance & irrigation advisory...")
     deficit, advisory, weather = water_balance(scene, crop_map, stage, stress, score, t_now)
@@ -76,6 +82,10 @@ def run(mode="sample", t_now=None):
     _save_class_png(stress, STRESS_CLASSES, OUT / "stress_map.png")
     _save_class_png(advisory, ADVISORY_CLASSES, OUT / "advisory_map.png")
     _save_scalar_png(scene["ndvi"][t_now], OUT / "ndvi_latest.png")
+    if vci is not None:
+        vci_disp = np.where(crop_map != 0, vci, np.nan)
+        _save_scalar_png(np.nan_to_num(vci_disp, nan=float(np.nanmax(vci_disp))),
+                         OUT / "vci_map.png", cmap="RdYlGn")
 
     # --- time series: per-crop mean NDVI / NDWI ---
     dates = [(datetime.fromisoformat(SEASON_START) + timedelta(days=COMPOSITE_DAYS * i)
@@ -114,6 +124,9 @@ def run(mode="sample", t_now=None):
         "stage_pct": {STAGES[s]: round(float(((stage == s) & cropped).sum() / n_cropped * 100), 1)
                       for s in range(len(STAGES))},
         "mean_deficit_mm": round(float(deficit[cropped].mean()), 1),
+        "stress_method": "VCI (multi-year NDVI baseline) + canopy-water"
+                         if vci is not None else "same-crop spatial anomaly",
+        "mean_vci": round(float(vci[cropped].mean()), 3) if vci is not None else None,
         "weather": weather,
         "timeseries": ts,
     }

@@ -40,6 +40,7 @@ WORLDCEREAL = "ESA/WorldCereal/2021/MODELS/v100"
 CONF_MIN = 80          # only train on WorldCereal pixels this confident
 N_POINTS = 1200        # total ground-truth points, sampled ~proportional to prevalence
 N_FLOOR = 70           # minimum points per present class (so rare classes still train)
+VCI_YEARS = list(range(2019, 2025))   # multi-year NDVI baseline for VCI (per 8-day window)
 
 
 def _grid():
@@ -68,11 +69,14 @@ def _fetch(ee, image, bands):
 
 def generate_scene():
     if os.path.exists(CACHE) and not os.environ.get("GEE_REFRESH"):
-        print(f"  using cached data ({CACHE}); set GEE_REFRESH=1 to refetch")
         d = dict(np.load(CACHE))
-        gt = _load_gt_csv() if GT_CSV else _sample_labels(d["label"], d["conf"])
-        return {**d, "crop_truth": None, "field_id": None, "stressed_truth": None,
-                "gt": gt, "wc_label": d["label"]}
+        if "ndvi_lo" not in d:
+            print("  cache missing VCI baseline; refetching from GEE...")
+        else:
+            print(f"  using cached data ({CACHE}); set GEE_REFRESH=1 to refetch")
+            gt = _load_gt_csv() if GT_CSV else _sample_labels(d["label"], d["conf"])
+            return {**d, "crop_truth": None, "field_id": None, "stressed_truth": None,
+                    "gt": gt, "wc_label": d["label"]}
 
     try:
         import ee
@@ -121,16 +125,48 @@ def generate_scene():
     print("  fetching ESA WorldCereal ground-truth labels...")
     label, conf = _worldcereal(ee, region)
 
+    print(f"  fetching multi-year NDVI baseline for VCI ({VCI_YEARS[0]}-{VCI_YEARS[-1]})...")
+    ndvi_lo, ndvi_hi = _vci_baseline(ee, region, start)
+
     os.makedirs(os.path.dirname(CACHE), exist_ok=True)
-    np.savez_compressed(CACHE, ndvi=ndvi, ndwi=ndwi, vv=vv, vh=vh,
-                        et0=et0, rain=rain, label=label, conf=conf)
+    np.savez_compressed(CACHE, ndvi=ndvi, ndwi=ndwi, vv=vv, vh=vh, et0=et0, rain=rain,
+                        label=label, conf=conf, ndvi_lo=ndvi_lo, ndvi_hi=ndvi_hi)
 
     gt = _load_gt_csv() if GT_CSV else _sample_labels(label, conf)
     return {
         "ndvi": ndvi, "ndwi": ndwi, "vv": vv, "vh": vh,
         "crop_truth": None, "field_id": None, "stressed_truth": None,
         "et0": et0, "rain": rain, "gt": gt, "wc_label": label,
+        "ndvi_lo": ndvi_lo, "ndvi_hi": ndvi_hi,
     }
+
+
+def _vci_baseline(ee, region, start):
+    """Per-composite multi-year NDVI 10th/90th percentile envelope (for VCI).
+
+    For each 8-day window, reduces all Sentinel-2 NDVI across VCI_YEARS falling
+    in the same day-of-year range. VCI = (NDVI - lo) / (hi - lo) then measures a
+    pixel's ABSOLUTE condition against its own historical range at that time of
+    year — so region-wide stress is detectable, unlike a spatial anomaly.
+    """
+    lo = np.full((N_COMPOSITES, GRID_SIZE, GRID_SIZE), np.nan, np.float32)
+    hi = np.full_like(lo, np.nan)
+    for i in range(N_COMPOSITES):
+        d0 = start.advance(i * COMPOSITE_DAYS, "day")
+        doy0 = d0.getRelative("day", "year").getInfo() + 1
+        doy1 = doy0 + COMPOSITE_DAYS
+        col = (ee.ImageCollection(S2_SR).filterBounds(region)
+               .filter(ee.Filter.calendarRange(VCI_YEARS[0], VCI_YEARS[-1], "year"))
+               .filter(ee.Filter.calendarRange(doy0, doy1, "day_of_year"))
+               .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 50))
+               .map(lambda im: im.normalizedDifference(["B8", "B4"]).rename("ndvi")))
+        if col.size().getInfo() == 0:
+            continue
+        pct = col.reduce(ee.Reducer.percentile([10, 90]))
+        lo[i], hi[i] = _fetch(ee, pct, ["ndvi_p10", "ndvi_p90"])
+        print(f"    baseline window {i + 1}/{N_COMPOSITES}", flush=True)
+    _gap_fill(lo), _gap_fill(hi)
+    return lo, hi
 
 
 def _worldcereal(ee, region):

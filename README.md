@@ -44,8 +44,12 @@ Weather (CHIRPS rain, ERA5 ET₀) ──► Kc water balance ◄─ stage-aware 
 
 - **Crop classification** — Random Forest on multi-temporal NDVI/NDWI/VV/VH +
   phenology metrics (SOS, EOS, peak timing); validated with OA and kappa.
-- **Moisture stress** — per-pixel anomaly vs same-crop, same-composite medians
-  (phenology-aware: natural senescence is not flagged); classes none/mild/moderate/severe.
+- **Moisture stress** — primary signal is **VCI (Vegetation Condition Index)**,
+  an *absolute* index: each pixel's NDVI vs its own multi-year (2019–24) 10th/90th
+  percentile envelope for that 8-day window. VCI≈0 = worst-on-record, ≈1 = best.
+  Blended with a canopy-water (NDWI) term. Because it's absolute, it detects
+  region-wide stress that a spatial anomaly cannot. (Sample mode, with no
+  multi-year history, falls back to a same-crop spatial anomaly.)
 - **Irrigation advisory** — FAO-56 Kc × ET₀ demand minus effective rainfall,
   escalated by observed stress → *no action / irrigate within 8 days / irrigate now*.
 

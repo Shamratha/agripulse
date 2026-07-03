@@ -74,6 +74,7 @@ const LAYERS = [
   { key:"crop",     title:"Crop Type",  img:"/outputs/crop_map.png" },
   { key:"stress",   title:"Moisture Stress", img:"/outputs/stress_map.png" },
   { key:"advisory", title:"Irrigation Advisory", img:"/outputs/advisory_map.png" },
+  { key:"vci",      title:"VCI (condition)", img:"/outputs/vci_map.png" },
   { key:"ndvi",     title:"NDVI (latest)", img:"/outputs/ndvi_latest.png" },
 ];
 
@@ -111,7 +112,8 @@ async function main() {
     ["Overall accuracy", (m.overall_accuracy*100).toFixed(1)+"%", "vs "+nir+" baseline"],
     ["Kappa", m.kappa.toFixed(2), "skill above chance"],
     ["Map agreement", m.map_agreement_worldcereal!=null ? (m.map_agreement_worldcereal*100).toFixed(1)+"%" : "—", "wall-to-wall vs WorldCereal"],
-    ["Cropped area stressed", stressed.toFixed(1)+"%", "moderate + severe"],
+    ["Cropped area stressed", stressed.toFixed(1)+"%", "moderate + severe (VCI)"],
+    ["Mean VCI", s.mean_vci!=null ? s.mean_vci.toFixed(2) : "—", "0 worst … 1 best on record"],
     ["Mean 8-day deficit", s.mean_deficit_mm+" mm", "ETc − effective rain"],
     ["Irrigate now", urgent.toFixed(1)+"%", "of cropped area"],
   ];
@@ -129,6 +131,7 @@ async function main() {
   LAYERS.forEach(l => overlays[l.key] = L.imageOverlay(l.img, bounds));
 
   const legends = { crop:s.legends.crop, stress:s.legends.stress, advisory:s.legends.advisory,
+                    vci:{ "stressed (VCI 0)":"#d73027", "healthy (VCI 1)":"#1a9850" },
                     ndvi:{ "low NDVI":"#d73027", "high NDVI":"#1a9850" } };
   const tabs = document.getElementById("tabs");
   LAYERS.forEach((l,i) => {
