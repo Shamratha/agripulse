@@ -1,4 +1,4 @@
-# AgriPulse 🌾🛰️
+# AgriPulse 
 
 **A phenology-aware moisture-stress and 8-day irrigation-advisory engine for
 canal command areas.** Built for the Bharat Antariksh Hackathon problem statement.
