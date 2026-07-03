@@ -1,13 +1,20 @@
 # AgriPulse 🌾🛰️
 
-AI-driven crop type mapping, stage-aware moisture stress detection, and 8-day
-irrigation advisories from multi-source satellite data (optical + SAR).
-Built for the Bharat Antariksh Hackathon problem statement.
+**A phenology-aware moisture-stress and 8-day irrigation-advisory engine for
+canal command areas.** Built for the Bharat Antariksh Hackathon problem statement.
+
+> **Where the contribution actually is.** Sentinel + Random Forest crop
+> classification is a solved, commodity baseline — many teams will submit it.
+> AgriPulse's differentiation is the layer *on top*: an **absolute, stage-aware
+> VCI moisture-stress index** (each pixel judged against its own multi-year
+> history, with flowering held to stricter thresholds than maturity) feeding a
+> **FAO-56 crop-water-balance irrigation advisory** that stays coherent with the
+> observed stress. The classifier is the substrate; the stress → advisory chain
+> is the product.
 
 **Pilot:** ~20 × 18 km in **Ludhiana district, Punjab** (Payal / Malerkotla,
 Sirhind canal belt), **rabi 2020–21**. Real Sentinel-1/2 + CHIRPS + ERA5 via
-Google Earth Engine; crop ground truth from **ESA WorldCereal 2021** (a global
-product validated against 100k+ in-situ field samples).
+Google Earth Engine; crop reference labels from **ESA WorldCereal 2021**.
 
 ## Validation (honest numbers)
 
@@ -72,6 +79,41 @@ The suite is deliberately contract-focused rather than exhaustive: this is a
 compact numeric pipeline (~580 statements) with little branching per module, so a
 handful of contract tests hit ~95% of the runnable code. The count scales with
 branching, not ambition.
+
+## Data sources, resolution & national alignment
+
+**On "Moderate Resolution."** The PS *title* says moderate resolution (strictly,
+MODIS/AWiFS-class, ~56 m–1 km), but the PS *body* names the sanctioned inputs
+explicitly:
+
+> *"optical observations such as LISS-IV, LISS-III, AWiFS, Sentinel-2, Landsat
+> and MODIS … microwave SAR observations such as EOS-04, Sentinel-1 and upcoming
+> NISAR."*
+
+So **Sentinel-1/2 are named, sanctioned PS inputs** — this prototype is on-spec,
+not off it. We deliberately use Sentinel's finer 10–20 m scale because a 20 km
+pilot needs field-level detail to be credible. The method — temporal indices →
+RF → multi-year VCI → FAO-56 — is **resolution-agnostic** and runs unchanged on
+moderate-resolution AWiFS/MODIS; coarser pixels are in fact the *operational*
+sweet spot (far fewer pixels to cover a state).
+
+**On indigenous data (honest status).** The current stack is open/foreign
+(Copernicus, CHIRPS, ERA5, WorldCereal) chosen for reproducibility — all
+free and on Earth Engine, so anyone can re-run it. Indian sources are the
+**operational path, not yet wired**, and slot into the same provider contract
+(`generate_scene()` returns one dict; sample/GEE are two implementations):
+
+| layer | prototype (foreign, wired) | indigenous swap (PS-named, roadmap) |
+|---|---|---|
+| optical | Sentinel-2 | **AWiFS / LISS-III via ISRO Bhoonidhi** (moderate-res) |
+| SAR | Sentinel-1 | **EOS-04 / RISAT, upcoming NISAR** |
+| rainfall | CHIRPS | **IMD gridded rainfall** |
+| ET / weather | ERA5-Land | **INSAT-derived ET, IMD grids** |
+| crop labels | WorldCereal (satellite product) | **field survey points via `GT_CSV`** |
+
+The last row is also the fix for the ground-truth circularity flagged above:
+WorldCereal is a satellite reference, not field truth — the `GT_CSV` hook is
+already wired to report accuracy against real survey points when available.
 
 ## Pipeline
 
@@ -146,6 +188,32 @@ GEE notes:
 - `--at T` picks the composite to analyse for stress/advisory (0-based,
   default last). Mid/late season (e.g. `--at 14`, ~21 Feb) is the interesting
   irrigation window for rabi wheat.
+
+## Scaling to an operational system
+
+Google Earth Engine here is a **prototyping backend** (per-user auth, quotas) —
+we do **not** claim it as the operational foundation for a national service. What
+makes the design scalable is the shape of the compute, not the host:
+
+- **Per-tile and embarrassingly parallel.** Each run is one command area over one
+  season — bounded work (20 composites over a small AOI). A district or state is
+  just a set of command-area AOIs run independently; there is no global step that
+  grows with area. Throughput scales by adding workers, not by a bigger model.
+- **Swappable backend.** The same `generate_scene()` provider contract that
+  switches sample↔GEE also lets the operational build swap GEE for an
+  ISRO-native pipeline (**Bhoonidhi / MOSDAC** batch processing) or a cloud-native
+  **STAC + Cloud-Optimized-GeoTIFF** stack (Sentinel Hub, MS Planetary Computer,
+  or a self-hosted rasterio/dask cluster) — no change to the science modules.
+- **Lightweight, standards-based outputs.** Each run emits small **georeferenced
+  rasters (`.wld`/`.prj`, QGIS/ArcGIS-ready) + a JSON summary** — trivial to push
+  to a command-area office, a Bhuvan-style portal, or a PMKSY/PMFBY dashboard. No
+  heavyweight serving tier required.
+- **Cadence.** Sentinel/AWiFS 8-day composites match the PS's 8-day water-deficit
+  window; a cron per AOI produces a rolling advisory layer.
+
+The realistic operational sensor is **moderate-resolution AWiFS** (indigenous,
+PS-named, wide-swath) — coarser pixels mean a state is covered in far fewer tiles,
+which is exactly why the resolution-agnostic method matters for national scale.
 
 ## Layout
 
