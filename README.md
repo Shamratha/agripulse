@@ -27,15 +27,25 @@ folds** (west/east + north/south, both directions) so the score is shown to be
 stable, not an artifact of one boundary. **Kappa / macro-F1 are the headline, not
 OA** — in an ~86%-wheat monoculture an "always-wheat" classifier already scores ~90%.
 
+All held-out metrics are **mean ± std over the 4 spatial folds** — aggregates
+*and* per-class, so the weak class gets the same scrutiny as the headline.
+
 | metric | value | meaning |
 |---|---|---|
-| **Kappa** | **0.67 ± 0.03** | skill above chance, mean ± std over 4 spatial folds |
+| **Kappa** | **0.67 ± 0.03** | skill above chance, over 4 spatial folds |
 | Macro-F1 | 0.77 ± 0.03 | mean F1 across the three classes |
 | Overall accuracy | 92.1% ± 0.5% | only just beats the ~89.6% "always-wheat" baseline |
-| Full-map agreement | ~88.9% | wall-to-wall vs WorldCereal |
-| Wheat F1 | 0.96 | winter-cereal detection is strong |
-| Non-crop F1 | 0.77 | rare class (~4% of area) |
-| Other-crop F1 | 0.50 | heterogeneous catch-all — the genuine hard part |
+| Wheat F1 | 0.96 ± 0.00 | winter-cereal detection is strong and stable |
+| Non-crop F1 | 0.81 ± 0.05 | rare class (~4% of area) |
+| Other-crop F1 | 0.55 ± 0.04 | heterogeneous catch-all — *consistently* the hard part |
+| Full-map agreement | ~88.9%† | †single map-vs-map concordance, **not** a fold metric (see below) |
+
+† **Full-map agreement** is a *deployment* statistic, not a held-out evaluation:
+the final model (trained on all ground-truth points) predicts every pixel, and
+that wall-to-wall map is compared once against the whole WorldCereal raster. It
+includes training pixels, so it's an optimistic concordance — a "does the output
+map look like the reference" sanity check, not an accuracy estimate. The
+fold-averaged numbers above are the honest generalisation figures.
 
 **What is validated, not just asserted:**
 - **Crop map:** 4-fold spatial hold-out with mean ± std, full confusion matrix,
@@ -49,13 +59,19 @@ OA** — in an ~86%-wheat monoculture an "always-wheat" classifier already score
 
 ## Tests
 
-**7 tests, 71% line coverage** (`.venv\Scripts\python -m pytest`). Coverage of the
-offline-testable code is **94%** — stress `100%`, features `100%`, config `100%`,
-water `96%`, pipeline `89%`, classify `85%`. The live Earth Engine fetch layer
+**10 tests, 72% line coverage** (`.venv\Scripts\python -m pytest`). Coverage of the
+offline-testable code is **~95%** — stress `100%`, features `100%`, config `100%`,
+water `100%`, pipeline `89%`, classify `89%`. The live Earth Engine fetch layer
 (`data_gee`, 17%) is excluded as it needs network. Tests guard the numeric
-contracts the dashboard/README depend on: band/scene shape parity, VCI ∈ [0,1],
-stress/advisory class ranges, metric well-formedness (OA reported with its
-baseline; precision+recall present), and a full end-to-end sample run.
+contracts the rest of the code depends on: band/scene shape parity, VCI ∈ [0,1],
+stress/advisory class ranges, feature-name↔matrix alignment, advisory
+escalation/de-escalation logic, fold-averaged per-class metrics, and a full
+end-to-end sample run.
+
+The suite is deliberately contract-focused rather than exhaustive: this is a
+compact numeric pipeline (~580 statements) with little branching per module, so a
+handful of contract tests hit ~95% of the runnable code. The count scales with
+branching, not ambition.
 
 ## Pipeline
 

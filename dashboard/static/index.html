@@ -99,11 +99,14 @@ function renderValidation(m, cropLegend) {
     const rsum = row.reduce((a,b)=>a+b,0);
     html += `<tr><th>${short[L[ri]]||names[L[ri]]}</th>` +
       row.map((v,ci)=>`<td class="${ri===ci?'diag':''}" style="background:rgba(76,175,125,${(v/Math.max(rsum,1)*0.55).toFixed(2)})">${v}</td>`).join("") +
-      `<td class="rec">${(m.per_class_recall[L[ri]]*100).toFixed(0)}%</td>` +
-      `<td class="rec">${((m.per_class_precision?.[L[ri]]??0)*100).toFixed(0)}%</td>` +
-      `<td class="rec">${((m.per_class_f1?.[L[ri]]??0)*100).toFixed(0)}%</td></tr>`;
+      `<td class="rec">${((m.per_class_recall_primary?.[L[ri]]??0)*100).toFixed(0)}%</td>` +
+      `<td class="rec">${((m.per_class_precision_primary?.[L[ri]]??0)*100).toFixed(0)}%</td>` +
+      `<td class="rec">${((m.per_class_f1_primary?.[L[ri]]??0)*100).toFixed(0)}%</td></tr>`;
   });
   html += `</table>`;
+  const short2 = ["Non-crop","Wheat","Other crop"];
+  const f1line = L.map(i => `${short2[i]||i} ${(m.per_class_f1[i]*100).toFixed(0)}±${((m.per_class_f1_std?.[i]??0)*100).toFixed(0)}%`).join(" · ");
+  html += `<div class="note"><b>Per-class F1 across ${m.n_folds} folds:</b> ${f1line} (table columns above = the reference west→east fold, aligned with its confusion matrix).</div>`;
   html += `<div class="note">${m.n_train} train / ${m.n_test} test points · ${m.validation} · reference: ${m.reference}. `
     + `Headline is <b>κ=${m.kappa.toFixed(2)} ± ${(m.kappa_std??0).toFixed(2)}</b> across ${m.n_folds} spatial folds / macro-F1 ${(m.macro_f1*100).toFixed(0)}%; overall accuracy ${(m.overall_accuracy*100).toFixed(1)}% only just beats the ${(m.no_information_rate*100).toFixed(1)}% "always-wheat" baseline, so OA alone is not the story. `
     + `Wheat & cropland detection are strong; subdividing the heterogeneous "other cropland" class is the hard part. `
