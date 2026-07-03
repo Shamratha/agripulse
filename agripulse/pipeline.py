@@ -56,7 +56,14 @@ def run(mode="sample", t_now=None):
 
     print("Classifying crops (Random Forest)...")
     crop_map, metrics = classify_crops(features, scene)
-    print(f"  OA={metrics['overall_accuracy']:.2%}  kappa={metrics['kappa']:.3f}")
+    print(f"  OA={metrics['overall_accuracy']:.2%}  kappa={metrics['kappa']:.3f} "
+          f"({metrics['validation']} vs {metrics['reference']})")
+
+    # wall-to-wall agreement with the full WorldCereal reference map (GEE mode)
+    wc = scene.get("wc_label")
+    if wc is not None:
+        metrics["map_agreement_worldcereal"] = round(float((crop_map == wc).mean()), 4)
+        print(f"  full-map agreement vs WorldCereal: {metrics['map_agreement_worldcereal']:.2%}")
 
     print(f"Assessing moisture stress (stage-aware) at composite {t_now}...")
     stress, stage, score = stress_assessment(scene, crop_map, t_now)

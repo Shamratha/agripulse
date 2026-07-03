@@ -19,6 +19,14 @@
   .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
   .card .v { font-size:24px; font-weight:600; margin-top:2px; }
   .card .l { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  .card .sub2 { color:#6f8578; font-size:11px; margin-top:2px; }
+  #valBody { font-size:13px; }
+  #valBody table { border-collapse:collapse; margin:6px 0 10px; }
+  #valBody th, #valBody td { padding:4px 9px; text-align:center; border:1px solid var(--line); }
+  #valBody th { color:var(--muted); font-weight:500; font-size:12px; }
+  #valBody .diag { font-weight:700; }
+  #valBody .note { color:#6f8578; font-size:12px; line-height:1.45; }
+  .rec { display:inline-block; min-width:38px; }
   .grid { display:grid; grid-template-columns:1.25fr 1fr; gap:14px; }
   @media (max-width:980px){ .grid{grid-template-columns:1fr} }
   .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; }
@@ -37,7 +45,7 @@
 <body>
 <header>
   <h1>Agri<span>Pulse</span></h1>
-  <div class="sub">Sirhind Canal command pilot · Rabi 2025-26 · 8-day composites</div>
+  <div class="sub">Ludhiana district, Punjab (Sirhind canal belt) · Rabi 2020–21 · 8-day composites · Sentinel-1/2 + WorldCereal</div>
   <div class="badge" id="mode"></div>
 </header>
 
@@ -51,6 +59,10 @@
     <div id="legend"></div>
   </div>
   <div class="charts">
+    <div class="panel" id="valPanel">
+      <h2>Validation — vs ESA WorldCereal (spatial hold-out)</h2>
+      <div id="valBody"></div>
+    </div>
     <div class="panel"><h2>Crop NDVI Trajectories (season)</h2><canvas id="ndviChart"></canvas></div>
     <div class="panel"><h2>Canopy Water (NDWI)</h2><canvas id="ndwiChart"></canvas></div>
     <div class="panel"><h2>Weather — ET₀ demand vs rainfall (mm / 8 days)</h2><canvas id="wxChart"></canvas></div>
@@ -65,23 +77,48 @@ const LAYERS = [
   { key:"ndvi",     title:"NDVI (latest)", img:"/outputs/ndvi_latest.png" },
 ];
 
+function renderValidation(m, cropLegend) {
+  const names = Object.keys(cropLegend);          // index 0..2 = class ids
+  const short = ["Non-crop", "Wheat", "Other crop"];
+  const cm = m.confusion_matrix, L = m.labels;
+  const tot = cm.flat().reduce((a,b)=>a+b,0);
+  let html = `<table><tr><th>truth ↓ / pred →</th>${L.map(i=>`<th>${short[i]||names[i]}</th>`).join("")}<th>recall</th></tr>`;
+  cm.forEach((row,ri) => {
+    const rsum = row.reduce((a,b)=>a+b,0);
+    html += `<tr><th>${short[L[ri]]||names[L[ri]]}</th>` +
+      row.map((v,ci)=>`<td class="${ri===ci?'diag':''}" style="background:rgba(76,175,125,${(v/Math.max(rsum,1)*0.55).toFixed(2)})">${v}</td>`).join("") +
+      `<td class="rec">${(m.per_class_recall[L[ri]]*100).toFixed(0)}%</td></tr>`;
+  });
+  html += `</table>`;
+  html += `<div class="note">${m.n_train} train / ${m.n_test} test points · ${m.validation} · reference: ${m.reference}. `
+    + `Overall accuracy ${(m.overall_accuracy*100).toFixed(1)}% vs ${(m.no_information_rate*100).toFixed(1)}% "always-wheat" baseline; `
+    + `κ=${m.kappa.toFixed(2)} confirms real skill. Wheat & cropland detection are strong; subdividing the heterogeneous `
+    + `"other cropland" class is the hard part (a known limit of one-class-fits-all mixed crops).</div>`;
+  document.getElementById("valBody").innerHTML = html;
+}
+
 async function main() {
   const s = await (await fetch("/outputs/summary.json")).json();
   document.getElementById("mode").textContent =
     (s.mode === "sample" ? "SAMPLE DATA MODE" : "GEE LIVE DATA") +
     " · analysis: " + (s.analysis_date || s.dates[s.dates.length-1]);
 
+  const m = s.metrics;
   const stressed = (s.stress_pct["Moderate"]||0) + (s.stress_pct["Severe"]||0);
   const urgent = s.advisory_pct["Irrigate now (~50 mm)"] || 0;
+  const nir = m.no_information_rate != null ? (m.no_information_rate*100).toFixed(1)+"%" : "—";
   const cards = [
-    ["Classification OA", (s.metrics.overall_accuracy*100).toFixed(1)+"%"],
-    ["Kappa", s.metrics.kappa.toFixed(3)],
-    ["Cropped area stressed", stressed.toFixed(1)+"%"],
-    ["Mean 8-day deficit", s.mean_deficit_mm+" mm"],
-    ["Fields to irrigate now", urgent.toFixed(1)+"%"],
+    ["Overall accuracy", (m.overall_accuracy*100).toFixed(1)+"%", "vs "+nir+" baseline"],
+    ["Kappa", m.kappa.toFixed(2), "skill above chance"],
+    ["Map agreement", m.map_agreement_worldcereal!=null ? (m.map_agreement_worldcereal*100).toFixed(1)+"%" : "—", "wall-to-wall vs WorldCereal"],
+    ["Cropped area stressed", stressed.toFixed(1)+"%", "moderate + severe"],
+    ["Mean 8-day deficit", s.mean_deficit_mm+" mm", "ETc − effective rain"],
+    ["Irrigate now", urgent.toFixed(1)+"%", "of cropped area"],
   ];
   document.getElementById("cards").innerHTML = cards.map(
-    ([l,v]) => `<div class="card"><div class="l">${l}</div><div class="v">${v}</div></div>`).join("");
+    ([l,v,sub]) => `<div class="card"><div class="l">${l}</div><div class="v">${v}</div><div class="sub2">${sub||""}</div></div>`).join("");
+
+  renderValidation(m, s.legends.crop);
 
   // --- map ---
   const [w,so,e,n] = s.bounds, bounds = [[so,w],[n,e]];

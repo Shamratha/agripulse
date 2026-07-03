@@ -13,11 +13,11 @@ from .config import GRID_SIZE, N_COMPOSITES
 RNG = np.random.default_rng(42)
 
 # Double-logistic phenology parameters per crop: (base, amplitude, sos_t, eos_t)
+# Classes mirror the WorldCereal-grounded scheme in config.CROPS.
 PHENOLOGY = {
-    0: (0.12, 0.05, 4.0, 11.0),   # fallow: near-flat
-    1: (0.15, 0.58, 2.2, 12.5),   # wheat
-    2: (0.15, 0.50, 1.9, 11.2),   # mustard (earlier, shorter — overlaps wheat)
-    3: (0.42, 0.28, 1.0, 14.0),   # sugarcane (high year-round canopy)
+    0: (0.12, 0.05, 4.0, 11.0),   # non-cropland: near-flat
+    1: (0.15, 0.58, 2.2, 15.0),   # wheat / winter cereal
+    2: (0.15, 0.50, 1.9, 13.0),   # other cropland (earlier, shorter — overlaps wheat)
 }
 
 
@@ -34,8 +34,8 @@ def generate_scene(size=GRID_SIZE, n_fields=140, n_steps=N_COMPOSITES):
     d2 = (yy[..., None] - seeds[:, 0]) ** 2 + (xx[..., None] - seeds[:, 1]) ** 2
     field_id = np.argmin(d2, axis=-1)
 
-    # crop assignment per field: wheat-dominant rabi mosaic
-    field_crop = RNG.choice([0, 1, 2, 3], size=n_fields, p=[0.18, 0.47, 0.22, 0.13])
+    # crop assignment per field: wheat-dominant rabi mosaic (matches WorldCereal split)
+    field_crop = RNG.choice([0, 1, 2], size=n_fields, p=[0.10, 0.70, 0.20])
     crop = field_crop[field_id]
 
     # --- moisture stress: tail-end of the canal command (east side) ---

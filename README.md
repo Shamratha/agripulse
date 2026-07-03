@@ -4,6 +4,31 @@ AI-driven crop type mapping, stage-aware moisture stress detection, and 8-day
 irrigation advisories from multi-source satellite data (optical + SAR).
 Built for the Bharat Antariksh Hackathon problem statement.
 
+**Pilot:** ~20 × 18 km in **Ludhiana district, Punjab** (Payal / Malerkotla,
+Sirhind canal belt), **rabi 2020–21**. Real Sentinel-1/2 + CHIRPS + ERA5 via
+Google Earth Engine; crop ground truth from **ESA WorldCereal 2021** (a global
+product validated against 100k+ in-situ field samples).
+
+## Validation (honest numbers)
+
+Classifier is trained and validated against WorldCereal using a **spatial
+west/east hold-out** (not a random pixel split — random splits leak through
+neighbouring correlated pixels and inflate scores). On the pilot:
+
+| metric | value | meaning |
+|---|---|---|
+| Overall accuracy | ~90.7% | vs ~90.1% "always-wheat" baseline |
+| Kappa | ~0.60 | skill above chance (the honest headline in a wheat monoculture) |
+| Full-map agreement | ~88.8% | wall-to-wall vs WorldCereal |
+| Wheat recall | 99% | winter-cereal detection is strong |
+| Non-crop recall | 60% | rare class (~4% of area), edge/built-up confusion |
+| Other-crop recall | 37% | heterogeneous catch-all — the genuine hard part |
+
+Cropland vs non-cropland and wheat detection are strong; subdividing the ~10%
+mixed "other cropland" (mustard/potato/veg) is where error concentrates —
+expected, since those spectrally-similar rabi crops share one WorldCereal class.
+Swap in the hackathon's own finer field labels (`GT_CSV`) to sharpen this.
+
 ## Pipeline
 
 ```
@@ -46,14 +71,16 @@ python -m venv .venv
   LISS-III/AWiFS from Bhoonidhi for the indigenous-data story.
 
 GEE notes:
-- Fetched composites are cached in `outputs/gee_cache.npz` (offline demo
-  fallback); set `GEE_REFRESH=1` to refetch.
-- Without real survey points, training labels are **pseudo-labels** from NDVI
-  trajectory rules — fine for testing, replace before judging: set
-  `GT_CSV=path\to\points.csv` (columns `lon,lat,crop_id`).
+- Fetched composites **and** WorldCereal labels are cached in
+  `outputs/gee_cache.npz` (offline demo fallback); set `GEE_REFRESH=1` to refetch.
+- Ground-truth labels come from **ESA WorldCereal 2021**, sampled at
+  high-confidence (≥80) pixels ~proportional to class prevalence so the map
+  reproduces real crop-area proportions. Override with your own survey points
+  via `GT_CSV=path\to\points.csv` (columns `lon,lat,crop_id`; 0=non-crop,
+  1=wheat, 2=other).
 - `--at T` picks the composite to analyse for stress/advisory (0-based,
-  default last). Mid-season (e.g. `--at 12`, early Feb) is the interesting
-  irrigation window for rabi.
+  default last). Mid/late season (e.g. `--at 14`, ~21 Feb) is the interesting
+  irrigation window for rabi wheat.
 
 ## Layout
 

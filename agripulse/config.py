@@ -1,24 +1,29 @@
 """Pilot-area and crop configuration for the AgriPulse prototype.
 
-Pilot area: a patch of the Sirhind Canal command area, Punjab (rabi season).
-The sample-data generator synthesizes this area; the GEE provider clips the
-real collections to the same bounds.
+Pilot area: ~20 x 18 km in Ludhiana district, Punjab (Payal / Malerkotla belt,
+Sirhind Canal command), a textbook rabi wheat zone.
+
+Season is fixed to rabi 2020-21 because that is where independent, field-
+validated ground truth exists: ESA WorldCereal 2021 (winter-cereal, temporary-
+crop and irrigation products, validated against 100k+ in-situ samples). The
+methodology is season-agnostic; point SEASON_START and GT at the hackathon's
+provided current-season labels to run it operationally.
 """
 
 # Geographic bounds of the pilot command area [west, south, east, north]
 PILOT_BOUNDS = [75.90, 30.50, 76.10, 30.66]
-GRID_SIZE = 160  # pixels per side (~110 m/pixel over this extent)
+GRID_SIZE = 160  # pixels per side (~115 m/pixel over this extent)
 
-# Rabi season: 15 eight-day composites, Nov 1 -> Mar 31 (approx)
-N_COMPOSITES = 15
-SEASON_START = "2025-11-01"
+# Rabi 2020-21: 20 eight-day composites, Nov 1 -> ~Apr 10 (wheat green-up to senescence)
+N_COMPOSITES = 20
+SEASON_START = "2020-11-01"
 COMPOSITE_DAYS = 8
 
+# Crop classes grounded in ESA WorldCereal products (not invented rules)
 CROPS = {
-    0: {"name": "Fallow / Other", "color": "#9e9e7a"},
-    1: {"name": "Wheat", "color": "#2e7d32"},
-    2: {"name": "Mustard", "color": "#f9a825"},
-    3: {"name": "Sugarcane", "color": "#00695c"},
+    0: {"name": "Non-cropland", "color": "#9e9e7a"},
+    1: {"name": "Wheat (winter cereal)", "color": "#2e7d32"},
+    2: {"name": "Other cropland", "color": "#f9a825"},
 }
 
 # Growth stages indexed by fraction of the crop's season elapsed
@@ -26,9 +31,8 @@ STAGES = ["Sowing", "Vegetative", "Flowering", "Maturity"]
 
 # FAO-56 style crop coefficients per stage (Kc)
 KC = {
-    1: [0.35, 0.75, 1.15, 0.40],  # wheat
-    2: [0.35, 0.70, 1.10, 0.35],  # mustard
-    3: [0.50, 0.90, 1.25, 0.75],  # sugarcane
+    1: [0.35, 0.75, 1.15, 0.40],  # wheat / winter cereal
+    2: [0.35, 0.70, 1.05, 0.45],  # other temporary crops (mustard/potato/veg mix)
 }
 
 STRESS_CLASSES = {
