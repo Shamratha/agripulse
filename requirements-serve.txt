@@ -1,0 +1,4 @@
+# Slim deps for hosting the dashboard only (serves the committed demo_outputs
+# snapshot). The full pipeline deps are in requirements.txt.
+fastapi==0.139.0
+uvicorn==0.49.0

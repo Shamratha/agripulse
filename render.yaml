@@ -1,0 +1,14 @@
+# Render Blueprint — one-click deploy of the AgriPulse dashboard.
+# Serves the committed real-data snapshot in demo_outputs/ (no GEE auth needed).
+services:
+  - type: web
+    name: agripulse
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements-serve.txt
+    startCommand: uvicorn dashboard.server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: AGRIPULSE_OUTPUTS
+        value: demo_outputs
+      - key: PYTHON_VERSION
+        value: "3.13.4"

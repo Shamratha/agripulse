@@ -67,6 +67,11 @@
       <h2>Stage-wise moisture stress by crop (% moderate + severe)</h2>
       <div id="stageBody"></div>
     </div>
+    <div class="panel" id="impPanel">
+      <h2>Random Forest feature importance</h2>
+      <img id="impImg" src="/outputs/feature_importance.png" alt="feature importance" style="max-width:100%;border-radius:6px">
+      <div class="note" id="impNote"></div>
+    </div>
     <div class="panel"><h2>Crop NDVI Trajectories (season)</h2><canvas id="ndviChart"></canvas></div>
     <div class="panel"><h2>Canopy Water (NDWI)</h2><canvas id="ndwiChart"></canvas></div>
     <div class="panel"><h2>Weather — ET₀ demand vs rainfall (mm / 8 days)</h2><canvas id="wxChart"></canvas></div>
@@ -100,9 +105,9 @@ function renderValidation(m, cropLegend) {
   });
   html += `</table>`;
   html += `<div class="note">${m.n_train} train / ${m.n_test} test points · ${m.validation} · reference: ${m.reference}. `
-    + `Headline is <b>κ=${m.kappa.toFixed(2)}</b> / macro-F1 ${(m.macro_f1*100).toFixed(0)}%; overall accuracy ${(m.overall_accuracy*100).toFixed(1)}% only just beats the ${(m.no_information_rate*100).toFixed(1)}% "always-wheat" baseline, so OA alone is not the story. `
+    + `Headline is <b>κ=${m.kappa.toFixed(2)} ± ${(m.kappa_std??0).toFixed(2)}</b> across ${m.n_folds} spatial folds / macro-F1 ${(m.macro_f1*100).toFixed(0)}%; overall accuracy ${(m.overall_accuracy*100).toFixed(1)}% only just beats the ${(m.no_information_rate*100).toFixed(1)}% "always-wheat" baseline, so OA alone is not the story. `
     + `Wheat & cropland detection are strong; subdividing the heterogeneous "other cropland" class is the hard part. `
-    + `Reference labels are a satellite product (WorldCereal), not in-situ field truth — set GT_CSV to validate against real survey points.</div>`;
+    + `<b>Reference labels are a satellite product (WorldCereal), not in-situ field truth</b> — these numbers measure agreement with another model, not ground accuracy. Set GT_CSV to validate against real survey points.</div>`;
   document.getElementById("valBody").innerHTML = html;
 }
 
@@ -137,9 +142,10 @@ async function main() {
   const urgent = s.advisory_pct[advKeys.find(k=>/now/i.test(k))] || 0;
   const nir = m.no_information_rate != null ? (m.no_information_rate*100).toFixed(1)+"%" : "—";
   const smiR = s.smi_crosscheck ? s.smi_crosscheck.smi_vs_rain_lag1_corr : null;
+  const pm = (v,s)=>v.toFixed(2)+(s!=null?" ± "+s.toFixed(2):"");
   const cards = [
-    ["Kappa", m.kappa.toFixed(2), "the honest headline"],
-    ["Macro-F1", (m.macro_f1*100).toFixed(0)+"%", "mean over classes"],
+    ["Kappa", pm(m.kappa, m.kappa_std), (m.n_folds||1)+"-fold spatial CV"],
+    ["Macro-F1", pm(m.macro_f1, m.macro_f1_std), "mean over classes"],
     ["Overall accuracy", (m.overall_accuracy*100).toFixed(1)+"%", "vs "+nir+" always-wheat"],
     ["Map agreement", m.map_agreement_worldcereal!=null ? (m.map_agreement_worldcereal*100).toFixed(1)+"%" : "—", "wall-to-wall vs WorldCereal"],
     ["Cropped area stressed", stressed.toFixed(1)+"%", "moderate + severe (VCI)"],
@@ -154,6 +160,13 @@ async function main() {
 
   renderValidation(m, s.legends.crop);
   renderStageStress(s.stress_by_stage_crop);
+  const g = m.feature_importance_groups || {};
+  const opt = Object.entries(g).filter(([k])=>/NDVI t|NDWI|EVI|NDVI m|NDVI s|NDVI p|SOS|EOS|LGP|NDVI$/.test(k)||["NDVI","NDWI","EVI"].includes(k))
+                .reduce((a,[,v])=>a+v,0);
+  const sar = (g["VV"]||0)+(g["VH"]||0)+(g["VH-VV"]||0);
+  document.getElementById("impNote").textContent =
+    `Optical indices (NDVI/EVI/NDWI) dominate; Sentinel-1 SAR contributes ~${(sar*100).toFixed(0)}% — `
+    + `multi-source fusion, not optical alone. Temporal columns summed per band.`;
 
   // --- map ---
   const [w,so,e,n] = s.bounds, bounds = [[so,w],[n,e]];

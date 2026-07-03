@@ -24,6 +24,26 @@ def build_features(scene):
     return np.hstack(feats + [summaries]).astype(np.float32)
 
 
+def feature_names(scene):
+    """Column names matching build_features(), for feature-importance plots."""
+    T = scene["ndvi"].shape[0]
+    layers = ["NDVI", "NDWI", "VV", "VH", "VH-VV"]
+    if scene.get("evi") is not None:
+        layers.append("EVI")
+    names = [f"{l} t{t}" for l in layers for t in range(T)]
+    names += ["NDVI max", "NDVI mean", "NDVI std", "NDVI peak-t", "SOS", "EOS", "LGP"]
+    return names
+
+
+def importance_by_group(names, importances):
+    """Aggregate per-column importances into readable groups (band / phenology)."""
+    groups = {}
+    for n, imp in zip(names, importances):
+        key = n.split(" t")[0] if " t" in n else n  # collapse temporal columns per band
+        groups[key] = groups.get(key, 0.0) + float(imp)
+    return dict(sorted(groups.items(), key=lambda kv: kv[1], reverse=True))
+
+
 def sos(ndvi, thresh=0.30):
     """Start of season: first composite where NDVI crosses thresh (T if never)."""
     T = ndvi.shape[0]

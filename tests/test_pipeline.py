@@ -73,3 +73,23 @@ def test_advisory_classes_valid(scene):
 def test_stage_aware_thresholds_differ():
     # flowering must be flagged at a higher VCI than maturity (stage-awareness)
     assert config.STRESS_VCI_BANDS[2][0] > config.STRESS_VCI_BANDS[3][0]
+
+
+def test_end_to_end_sample_run(tmp_path, monkeypatch):
+    # full orchestration in sample mode writes a well-formed summary + maps
+    import json
+    import agripulse.pipeline as pipe
+    monkeypatch.setattr(pipe, "OUT", tmp_path)
+    summary = pipe.run("sample")
+    for key in ("metrics", "stress_by_stage_crop", "crop_area_ha",
+                "recommended_depth_mm", "advisory_pct", "stress_validation"):
+        assert key in summary, key
+    m = summary["metrics"]
+    assert "kappa_std" in m and m["n_folds"] >= 1        # variance reported
+    assert "feature_importance_groups" in m              # importances reported
+    saved = {p.name for p in tmp_path.glob("*.png")}
+    assert {"crop_map.png", "stress_map.png", "advisory_map.png",
+            "feature_importance.png"} <= saved
+    # every map is georeferenced
+    assert (tmp_path / "crop_map.wld").exists() and (tmp_path / "crop_map.prj").exists()
+    json.loads((tmp_path / "summary.json").read_text())

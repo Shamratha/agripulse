@@ -21,7 +21,7 @@ from matplotlib.colors import ListedColormap
 from .config import (ADVISORY_CLASSES, COMPOSITE_DAYS, CROPS, GRID_SIZE,
                      PILOT_BOUNDS, SEASON_START, STAGES, STRESS_CLASSES)
 from .classify import classify_crops
-from .features import build_features
+from .features import build_features, feature_names, importance_by_group
 from .stress import stress_assessment
 from .water import water_balance
 
@@ -57,6 +57,22 @@ def _save_scalar_png(arr, path, cmap="RdYlGn", alpha=0.82):
     rgba[..., 3] = alpha
     plt.imsave(path, rgba)
     _write_worldfile(path)
+
+
+def _save_importance_png(groups, path):
+    """Horizontal bar chart of grouped RF feature importances."""
+    items = list(groups.items())[:14][::-1]
+    labels = [k for k, _ in items]
+    vals = [v for _, v in items]
+    fig, ax = plt.subplots(figsize=(5.4, 4.2), dpi=120)
+    ax.barh(labels, vals, color="#4caf7d")
+    ax.set_xlabel("Importance (summed over temporal columns)")
+    ax.set_title("Random Forest feature importance")
+    for sp in ("top", "right"):
+        ax.spines[sp].set_visible(False)
+    fig.tight_layout()
+    fig.savefig(path, transparent=True)
+    plt.close(fig)
 
 
 def _pixel_ha():
@@ -103,10 +119,16 @@ def run(mode="sample", t_now=None):
 
     print("Classifying crops (Random Forest)...")
     crop_map, confidence, metrics = classify_crops(features, scene)
-    print(f"  kappa={metrics['kappa']:.3f}  macro-F1={metrics['macro_f1']:.3f}  "
+    print(f"  kappa={metrics['kappa']:.3f}±{metrics['kappa_std']:.3f}  "
+          f"macro-F1={metrics['macro_f1']:.3f}±{metrics['macro_f1_std']:.3f}  "
           f"OA={metrics['overall_accuracy']:.2%} (no-info baseline {metrics['no_information_rate']:.2%})")
     print(f"  per-class F1: {metrics['per_class_f1']}")
-    print(f"  ({metrics['validation']}; reference = {metrics['reference']})")
+    print(f"  ({metrics['validation']}, {metrics['n_folds']} folds; reference = {metrics['reference']})")
+
+    # feature-importance plot (grouped by band + phenology)
+    groups = importance_by_group(feature_names(scene), metrics.pop("feature_importances"))
+    metrics["feature_importance_groups"] = {k: round(v, 4) for k, v in groups.items()}
+    _save_importance_png(groups, OUT / "feature_importance.png")
 
     # wall-to-wall agreement with the full WorldCereal reference map (GEE mode)
     wc = scene.get("wc_label")

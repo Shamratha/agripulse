@@ -11,35 +11,51 @@ product validated against 100k+ in-situ field samples).
 
 ## Validation (honest numbers)
 
-Classifier is validated against WorldCereal using a **spatial west/east hold-out**
-(not a random pixel split — random splits leak through neighbouring correlated
-pixels and inflate scores). **Kappa / macro-F1 are the headline, not OA** — in an
-~86%-wheat monoculture an "always-wheat" classifier already scores ~90%.
+> ### ⚠️ What these numbers do and don't prove
+> The reference labels are **ESA WorldCereal 2021 — itself a *satellite-derived*
+> model** (globally validated against ~100k field samples, but **not** field-checked
+> for this tile). So kappa/OA here measure **agreement with another satellite
+> model**, and can share spectral-confusion modes with our classifier — this is
+> **not** accuracy against ground truth. It shows the pipeline independently
+> reproduces a published crop product from our own S1+S2 feature stack; it does
+> **not** prove field-level correctness. Point `GT_CSV` (lon,lat,crop_id) at the
+> hackathon's survey points to get *real* field accuracy.
+
+Validated with **spatial hold-outs** (not random pixel splits — those leak
+through correlated neighbours and inflate scores), evaluated over **4 spatial
+folds** (west/east + north/south, both directions) so the score is shown to be
+stable, not an artifact of one boundary. **Kappa / macro-F1 are the headline, not
+OA** — in an ~86%-wheat monoculture an "always-wheat" classifier already scores ~90%.
 
 | metric | value | meaning |
 |---|---|---|
-| **Kappa** | **~0.63** | skill above chance — the honest headline |
-| Macro-F1 | ~0.74 | mean F1 across the three classes |
-| Overall accuracy | ~91.3% | only just beats the ~89.6% "always-wheat" baseline |
+| **Kappa** | **0.67 ± 0.03** | skill above chance, mean ± std over 4 spatial folds |
+| Macro-F1 | 0.77 ± 0.03 | mean F1 across the three classes |
+| Overall accuracy | 92.1% ± 0.5% | only just beats the ~89.6% "always-wheat" baseline |
 | Full-map agreement | ~88.9% | wall-to-wall vs WorldCereal |
 | Wheat F1 | 0.96 | winter-cereal detection is strong |
 | Non-crop F1 | 0.77 | rare class (~4% of area) |
 | Other-crop F1 | 0.50 | heterogeneous catch-all — the genuine hard part |
 
-> **On the ground truth:** WorldCereal is itself a *satellite-derived* product
-> (globally validated against ~100k field samples, but **not** field-verified for
-> this tile). So OA/kappa here measure **agreement with a satellite reference**,
-> not accuracy against ground truth, and share some spectral-confusion modes with
-> our classifier. Set `GT_CSV` (lon,lat,crop_id) to the hackathon's own survey
-> points to report accuracy against *real* field data.
-
 **What is validated, not just asserted:**
-- **Crop map:** spatial hold-out with full confusion matrix, per-class
-  precision/recall/F1, and the no-information baseline printed alongside OA.
+- **Crop map:** 4-fold spatial hold-out with mean ± std, full confusion matrix,
+  per-class precision/recall/F1, and the no-information baseline beside OA.
+- **Feature importance:** optical indices (NDVI/EVI/NDWI ≈ 71%) lead, but
+  Sentinel-1 SAR contributes ~23% — genuine multi-source fusion, not optical alone.
 - **Stress detector:** in sample mode, scored against injected field stress
   (recall ~0.86 / precision ~0.87) — it demonstrably recovers real stress.
 - **Soil moisture (SMI):** independent ERA5 soil moisture rises the composite
   *after* rainfall (r ≈ 0.32), confirming the moisture layer is physically real.
+
+## Tests
+
+**7 tests, 71% line coverage** (`.venv\Scripts\python -m pytest`). Coverage of the
+offline-testable code is **94%** — stress `100%`, features `100%`, config `100%`,
+water `96%`, pipeline `89%`, classify `85%`. The live Earth Engine fetch layer
+(`data_gee`, 17%) is excluded as it needs network. Tests guard the numeric
+contracts the dashboard/README depend on: band/scene shape parity, VCI ∈ [0,1],
+stress/advisory class ranges, metric well-formedness (OA reported with its
+baseline; precision+recall present), and a full end-to-end sample run.
 
 ## Pipeline
 
@@ -49,7 +65,8 @@ Optical (Sentinel-2 NDVI/NDWI) ─┐
 SAR (Sentinel-1 VV/VH) ─────────┘                        │
                                                          ▼
 Weather (CHIRPS rain, ERA5 ET₀) ──► Kc water balance ◄─ stage-aware stress
-                                          │                (VCI/NDWI/SAR anomaly)
+        │                                 │            (VCI + NDWI, stage thresholds)
+        └── ERA5 soil moisture (SMI) ─────┴─ independent moisture cross-check
                                           ▼
                             irrigation advisory maps + dashboard
 ```
@@ -118,13 +135,14 @@ GEE notes:
 
 ```
 agripulse/
-  config.py       pilot bounds, crops, Kc table, class legends
+  config.py       pilot bounds, crops, Kc table, stress/advisory thresholds, legends
   data_sample.py  synthetic scene generator (same contract as GEE provider)
-  data_gee.py     Google Earth Engine provider (real collection IDs)
-  features.py     temporal features + phenology (SOS/EOS/stage)
-  classify.py     Random Forest + OA/kappa validation
-  stress.py       stage-aware stress scoring
-  water.py        Kc water balance → advisory classes
-  pipeline.py     orchestration; writes outputs/ (PNG overlays + summary.json)
+  data_gee.py     GEE provider: S2/S1/CHIRPS/ERA5 + WorldCereal labels + VCI baseline
+  features.py     temporal features (NDVI/EVI/NDWI/VV/VH) + phenology (SOS/EOS/LGP)
+  classify.py     Random Forest + spatial hold-out (kappa, per-class precision/recall/F1)
+  stress.py       stage-aware VCI stress scoring
+  water.py        FAO-56 Kc water balance → advisory classes
+  pipeline.py     orchestration; writes georeferenced maps + summary.json
 dashboard/        FastAPI + Leaflet/Chart.js dashboard
+tests/            pytest suite guarding the numeric contracts
 ```
